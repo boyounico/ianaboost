@@ -133,4 +133,3 @@ Total boîtes : {total_boites}")
     if "popup" in st.session_state:
         st.subheader("Détail par saveur")
         st.json(st.session_state["popup"])
-
