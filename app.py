@@ -1,3 +1,4 @@
+
 import streamlit as st
 import datetime
 
@@ -15,6 +16,13 @@ if "stock" not in st.session_state:
     }
     st.session_state.stock_prec = st.session_state.stock.copy()
     st.session_state.historique = []
+    st.session_state.produits = {
+        "HIGHWATT45": {
+            "Citron": 320,
+            "Fruits Rouges": 120,
+            "Menthe Glacée": 64
+        }
+    }
 
 unités = {
     "Maltodextrine": "kg",
@@ -55,94 +63,96 @@ def calcul_gels_possibles():
         mini = min(mini, gels)
     return int(mini)
 
-def stock_suffisant(n_gels):
-    for ingr, qt in recette_hw45.items():
-        dispo = st.session_state.stock.get(ingr, 0) * 1000
-        if dispo < qt * n_gels:
-            return False
-    return True
+def total_produits_finaux():
+    total_gels = 0
+    total_grammes = 0
+    for gamme, saveurs in st.session_state.produits.items():
+        for saveur, qte in saveurs.items():
+            total_gels += qte
+            total_grammes += qte * 45  # 45g/gel
+    total_boites = total_gels // 16
+    return total_gels, total_boites, total_grammes
 
 # === Interface ===
-st.sidebar.title("IANABOOST MANAGER")
-onglet = st.sidebar.radio("Menu", ["STOCK", "PRODUCTION", "GAMMES", "HISTORIQUE", "B2B"])
+tabs = ["STOCK", "PRODUCTION", "GAMMES", "HISTORIQUE", "B2B"]
+selected_tab = st.selectbox("Menu", tabs, key="main_tab", label_visibility="collapsed")
 
-# --- STOCK ---
-if onglet == "STOCK":
-    st.title("STOCK : Matières Premières")
-    col1, col2, col3 = st.columns([3, 2, 2])
+sous_onglets = {
+    "STOCK": ["Matière première", "Produit fini"],
+    "PRODUCTION": [],
+    "GAMMES": [],
+    "HISTORIQUE": [],
+    "B2B": []
+}
 
-    with col1:
-        st.markdown("### Stock actuel")
+col1, col2 = st.columns([6, 1])
+
+with col1:
+    st.title(f"IANABOOST MANAGER — {selected_tab}")
+
+    sous = st.radio("Sous-onglet :", sous_onglets[selected_tab], horizontal=True) if sous_onglets[selected_tab] else None
+
+    if selected_tab == "STOCK" and sous == "Matière première":
+        st.subheader("STOCK MATIÈRES PREMIÈRES")
+        colg1, colg2 = st.columns([3, 3])
+        reappro = {}
         for ingr in st.session_state.stock:
             val = st.session_state.stock[ingr]
             prec = st.session_state.stock_prec[ingr]
             unit = unités[ingr]
-            st.markdown(f"**{ingr}** : {val:.3f} {unit} *(ancien : {prec:.3f} {unit})*")
+            alert = "🔴" if val < seuils[ingr] else ""
+            with colg1:
+                st.markdown(f"**{ingr}** : {val:.3f} {unit} *(dernier : {prec:.3f} {unit})* {alert}")
+            with colg2:
+                reappro[ingr] = st.text_input(f"{ingr} (ajout)", key=f"aj_{ingr}")
 
-    ajout = {}
-    with col2:
-        st.markdown("### Réapprovisionnement")
-        for ingr in st.session_state.stock:
-            unit = unités[ingr]
-            ajout[ingr] = st.text_input(f"{ingr} (+ {unit})", key=f"ajout_{ingr}")
-
-    if st.button("Valider le réapprovisionnement"):
-        for ingr in ajout:
-            try:
-                qt = float(ajout[ingr].replace(",", "."))
-                if qt > 0:
-                    st.session_state.stock_prec[ingr] = st.session_state.stock[ingr]
-                    st.session_state.stock[ingr] += qt
-                    st.session_state.historique.append(f"{now()} APPRO +{qt:.3f} sur {ingr}")
-                    st.success(f"{qt:.3f} ajouté à {ingr}")
-            except:
-                pass
-        st.experimental_rerun()
-
-    with col3:
-        st.markdown("### Synthèse")
-        gels = calcul_gels_possibles()
-        st.metric("Gels HW45 possibles", gels)
-        alerts = []
-        for ingr in st.session_state.stock:
-            if st.session_state.stock[ingr] < seuils[ingr]:
-                alerts.append(f"- {ingr} : {st.session_state.stock[ingr]:.3f} (seuil = {seuils[ingr]:.3f})")
-        if alerts:
-            st.error("#### ALERTES STOCK BAS\n" + "\n".join(alerts))
-        else:
-            st.success("Tous les stocks sont suffisants.")
-
-# --- PRODUCTION ---
-elif onglet == "PRODUCTION":
-    st.title("PRODUCTION")
-    st.markdown("### Gamme : HIGHWATT45")
-    saveur = st.selectbox("Choisir la saveur", ["Citron Bio", "Fruits Rouges", "Menthe Glacée"])
-    mode = st.radio("Entrer la quantité en :", ["Nombre de gels", "Nombre de boîtes"])
-    if mode == "Nombre de gels":
-        nb = st.number_input("Nombre de gels à produire", min_value=1, step=1)
-        gels = nb
-    else:
-        nb = st.number_input("Nombre de boîtes (16 gels/boîte)", min_value=1, step=1)
-        gels = nb * 16
-
-    if st.button("Valider la production"):
-        if stock_suffisant(gels):
-            for ingr, qt in recette_hw45.items():
-                consommation = gels * qt / 1000
-                st.session_state.stock_prec[ingr] = st.session_state.stock[ingr]
-                st.session_state.stock[ingr] -= consommation
-            st.session_state.historique.append(f"{now()} PRODUCTION {gels} gels HW45 ({saveur})")
-            st.success(f"{gels} gels HW45 ({saveur}) produits.")
+        if st.button("Valider le réapprovisionnement"):
+            for ingr, val in reappro.items():
+                try:
+                    ajout = float(val.replace(",", "."))
+                    if ajout > 0:
+                        st.session_state.stock_prec[ingr] = st.session_state.stock[ingr]
+                        st.session_state.stock[ingr] += ajout
+                        st.session_state.historique.append(f"{now()} APPRO +{ajout:.3f} sur {ingr}")
+                except:
+                    st.warning(f"Erreur saisie : {ingr}")
             st.experimental_rerun()
-        else:
-            st.error("Stock insuffisant pour cette production.")
 
-# --- HISTORIQUE ---
-elif onglet == "HISTORIQUE":
-    st.title("Historique des Mouvements")
-    for ligne in reversed(st.session_state.historique[-100:]):
-        st.write(ligne)
+        st.divider()
+        gels = calcul_gels_possibles()
+        st.success(f"Stock actuel permet de produire **{gels} gels HW45**")
+        if any(st.session_state.stock[i] < seuils[i] for i in seuils):
+            st.error("ALERTE : au moins un ingrédient est sous le seuil critique.")
+        if st.button("Voir historique stock"):
+            st.info("Historique :")
+            for ligne in reversed(st.session_state.historique[-30:]):
+                st.write(ligne)
 
-# --- AUTRES ONGLET (placeholders) ---
-else:
-    st.title(f"{onglet} (en cours de développement)")
+    elif selected_tab == "STOCK" and sous == "Produit fini":
+        st.subheader("STOCK PRODUITS FINIS")
+        for gamme, saveurs in st.session_state.produits.items():
+            with st.expander(f"Gamme : {gamme}"):
+                for saveur, qte in saveurs.items():
+                    boites = qte // 16
+                    poids = qte * 45
+                    st.markdown(f"**{saveur}** : {qte} gels – {boites} boîtes – {poids} g")
+
+        st.divider()
+        gels, boites, poids = total_produits_finaux()
+        colx1, colx2, colx3 = st.columns(3)
+        colx1.metric("Total gels", gels)
+        colx2.metric("Total boîtes", boites)
+        colx3.metric("Total poids (g)", poids)
+
+    elif selected_tab == "HISTORIQUE":
+        st.subheader("Historique complet")
+        for ligne in reversed(st.session_state.historique[-100:]):
+            st.write(ligne)
+    else:
+        st.info("Contenu à venir.")
+
+with col2:
+    st.markdown("### TESTS")
+    st.button("TEST1")
+    st.button("TEST2")
+    st.button("TEST3")
